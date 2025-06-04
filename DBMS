@@ -1,0 +1,163 @@
+1. db_connect.php (Database Connection – reusable across all files)
+php
+CopyEdit
+<?php
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "retail_store";
+
+$conn = new mysqli($host, $username, $password, $database);
+
+// Check connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+?>
+
+
+
+2. register.php (Updated with validation & security)
+php
+CopyEdit
+<?php
+require 'db_connect.php';
+		
+$errors = [];
+
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $username = trim($_POST['username']);
+    $password = $_POST['password'];
+    $role = $_POST['role'];
+
+    // Check if username already exists
+    $check = $conn->prepare("SELECT id FROM users WHERE username = ?");
+    $check->bind_param("s", $username);
+    $check->execute();
+    $check->store_result();
+
+    if ($check->num_rows > 0) {
+        $errors[] = "Username already taken.";
+    } else {
+        $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+        $stmt = $conn->prepare("INSERT INTO users (username, password, role) VALUES (?, ?, ?)");
+        $stmt->bind_param("sss", $username, $hashed_password, $role);
+        $stmt->execute();
+
+        header("Location: login.php");
+    }
+}
+?>
+
+<h2>Register</h2>
+<?php foreach ($errors as $error): ?>
+<p style="color:red"><?= $error ?></p>
+<?php endforeach; ?>
+
+<form method="POST">
+    Username: <input type="text" name="username" required><br>
+    Password: <input type="password" name="password" required><br>
+    Role:
+    <select name="role">
+        <option value="customer">Customer</option>
+        <option value="admin">Admin</option>
+    </select><br>
+    <input type="submit" value="Register">
+</form>
+
+3. login.php (Secure login with error messages)
+php
+CopyEdit
+<?php
+session_start();
+require 'db_connect.php';
+
+$login_error = "";
+
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $username = trim($_POST['username']);
+    $password = $_POST['password'];
+
+    $stmt = $conn->prepare("SELECT id, username, password, role FROM users WHERE username = ?");
+    $stmt->bind_param("s", $username);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($result->num_rows === 1) {
+        $user = $result->fetch_assoc();
+        if (password_verify($password, $user['password'])) {
+            $_SESSION['username'] = $user['username'];
+            $_SESSION['role'] = $user['role'];
+
+            if ($user['role'] == 'admin') {
+                header("Location: admin_dashboard.php");
+            } else {
+                header("Location: customer_dashboard.php");
+            }
+        } else {
+            $login_error = "Invalid password.";
+        }
+    } else {
+        $login_error = "User not found.";
+    }
+}
+?>
+
+<h2>Login</h2>
+<p style="color:red"><?= $login_error ?></p>
+<form method="POST">
+    Username: <input type="text" name="username" required><br>
+    Password: <input type="password" name="password" required><br>
+    <input type="submit" value="Login">
+</form>
+4. admin_dashboard.php (Admin can view all users and jobs)
+php
+CopyEdit
+<?php
+session_start();
+require 'db_connect.php';
+
+if (!isset($_SESSION['role']) || $_SESSION['role'] != 'admin') {
+    header("Location: login.php");
+    exit();
+}
+
+$result = $conn->query("SELECT * FROM users");
+$jobs = $conn->query("SELECT * FROM jobs");
+?>
+
+<h2>Welcome, Admin <?= $_SESSION['username'] ?></h2>
+<a href="logout.php">Logout</a>
+
+<h3>Registered Users:</h3>
+<table border="1">
+    <tr><th>ID</th><th>Username</th><th>Role</th></tr>
+    <?php while ($row = $result->fetch_assoc()): ?>
+        <tr>
+            <td><?= $row['id'] ?></td>
+            <td><?= $row['username'] ?></td>
+            <td><?= $row['role'] ?></td>
+        </tr>
+    <?php endwhile; ?>
+</table>
+
+<h3>Job Listings:</h3>
+<table border="1">
+    <tr><th>ID</th><th>Title</th><th>Company</th><th>Location</th></tr>
+    <?php while ($job = $jobs->fetch_assoc()): ?>
+        <tr>
+            <td><?= $job['id'] ?></td>
+            <td><?= $job['title'] ?></td>
+            <td><?= $job['company'] ?></td>
+            <td><?= $job['location'] ?></td>
+        </tr>
+    <?php endwhile; ?>
+</table>
+5. logout.php
+php
+CopyEdit
+<?php
+session_start();
+session_destroy();
+header("Location: login.php");
+exit();
